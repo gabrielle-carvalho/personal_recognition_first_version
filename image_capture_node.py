@@ -47,8 +47,9 @@ class ImageCaptureNode(Node):
             picnumber = len(os.listdir(path))
             cv2.imwrite(f'{path}/{picnumber}.png', frame)
             self.get_logger().info(f"Image saved as {path}/{picnumber}.png")
-            time.sleep(2)  # Pause between captures
+            
             self.get_logger().info("sleep mode for 2 seconds...")
+            time.sleep(2)  # Pause between captures
                         
         self.ok_publisher.publish(String(data="OK"))  # Publish OK message
         self.get_logger().info("Info", "Images Captured Successfully!")

@@ -2,9 +2,7 @@
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
-from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
-
 import os
 import cv2
 import dlib
@@ -18,19 +16,27 @@ class PeopleRecognition(Node):
         self.detector = dlib.get_frontal_face_detector()
         self.sp = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
         self.facerec = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
-
+        
+        self.create_subscription(String, 'turned_around', self.turned_callback, 10)
         self.labels, self._descriptors = self.prepare_training_data("images")
         self.name_publisher = self.create_publisher(String, 'recognized_person', 10)
         self.count_publisher = self.create_publisher(String, 'count_people', 10)
+
         self.get_logger().info("Face Recognition Node has Started")
         os.makedirs('predict', exist_ok=True)
-        
+        self.started = False
         self.total_faces_detected = 0  
+
+    def turned_callback(self, msg):
+        if not self.started:
+            self.get_logger().info("Preparing training data...")
+            self.labels, self._descriptors = self.prepare_training_data("images")
+            self.started = True
+        self.get_logger().info(f'Received: "{msg.data}"')
 
     def prepare_training_data(self, data_folder_path):
         labels = []
         descriptors = []
-
         if not os.path.exists(data_folder_path):
             self.get_logger().error(f"Data folder {data_folder_path} does not exist.")
             return labels, descriptors
@@ -70,7 +76,7 @@ class PeopleRecognition(Node):
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         faces = self.detector(gray)
-        current_faces_detected = len(faces)  # Número de rostos detectados na tela
+        current_faces_detected = len(faces)
 
         self.get_logger().info(f"Detected {current_faces_detected} faces on screen.")
 
@@ -79,7 +85,6 @@ class PeopleRecognition(Node):
             face_descriptor = self.facerec.compute_face_descriptor(frame, shape)
             name = self.match_face(np.array(face_descriptor), self.labels, self._descriptors)
 
-            # Desenhar a bounding box na imagem
             x, y, w, h = face.left(), face.top(), face.width(), face.height()
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.putText(frame, name if name != "Unknown" else "Unknown", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
@@ -88,16 +93,14 @@ class PeopleRecognition(Node):
                 self.get_logger().info(f"Recognized: {name}")
                 self.name_publisher.publish(String(data=name))
                 self.save_recognized_face(frame, name)
+            else:
+                self.save_recognized_face(frame, "Unknown")
 
-        self.total_faces_detected = current_faces_detected  # Atualiza o total com rostos detectados na tela
+        self.total_faces_detected = current_faces_detected
         self.get_logger().info(f"Total faces detected on screen: {self.total_faces_detected}")
-        
         self.count_publisher.publish(String(data=str(self.total_faces_detected)))
-        
 
     def save_recognized_face(self, frame, name):
-        self.get_logger().info(f"Attempting to save recognized face for: {name}")
-
         if frame is None or not isinstance(frame, np.ndarray):
             self.get_logger().error("Invalid frame, cannot save.")
             return
@@ -110,25 +113,21 @@ class PeopleRecognition(Node):
 
         self.get_logger().info(f"Saving image to: {file_name}")
 
-        try:
-            if cv2.imwrite(file_name, frame):
-                self.get_logger().info(f"Saved recognized face: {file_name}")
-            else:
-                self.get_logger().error(f"Failed to save image: {file_name}")
-        except Exception as e:
-            self.get_logger().error(f"Exception when saving image: {e}")
+        if cv2.imwrite(file_name, frame):
+            self.get_logger().info(f"Saved recognized face: {file_name}")
+        else:
+            self.get_logger().error(f"Failed to save image: {file_name}")
 
     def match_face(self, face_descriptor, labels, descriptors):
         distances = [distance.euclidean(face_descriptor, descriptor) for descriptor in descriptors]
         min_distance = min(distances)
 
-        if min_distance < 1.0:  # Threshold
+        if min_distance < 0.6:  # Threshold
             index = distances.index(min_distance)
-            self.get_logger().info(f"Recognized: {labels[index]} with distance: {min_distance}")
             return labels[index]
 
-        self.get_logger().info(f"No match found, closest distance: {min_distance}")
         return "Unknown"
+
 
 class App:
     def __init__(self, master, people_recognition_node):
@@ -139,7 +138,7 @@ class App:
         self.camera_label = Label(self.master)
         self.camera_label.pack()
 
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(0)  # Use the correct camera index
         self.update_frame()
 
     def update_frame(self):
@@ -158,11 +157,14 @@ class App:
             msg = bridge.cv2_to_imgmsg(frame, encoding="bgr8")
             self.people_recognition_node.recognition_callback(msg) 
 
-        # Desenhar a bounding box e o nome para cada face detectada
         for face in faces:
             x, y, w, h = face.left(), face.top(), face.width(), face.height()
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
             cv2.putText(frame, "Unknown", (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+        if len(faces) == 0:
+            height, width, _ = frame.shape
+            cv2.putText(frame, "Unknown", (width // 2 - 40, height // 2), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
         self.master.after(10, self.update_frame)
 
@@ -181,4 +183,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
