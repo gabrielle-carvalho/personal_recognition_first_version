@@ -9,19 +9,22 @@ import os
 import cv2
 import time
 
- # node that capture images
-class ImageCaptureNode(Node):
+class ImageCaptureNode(Node): # node that capture images
     def __init__(self):
         super().__init__("image_capture_node")
-        self.camera = cv2.VideoCapture(0) #change to the correct range
+        self.camera = cv2.VideoCapture(0) #change to the correct range  ls /dev/video*
         
         if not self.camera.isOpened():
             self.get_logger().error("Failed to open camera.")
             return
             
         self.create_subscription(String, 'person_name', self.capture_callback, 10)
+        
         self.ok_publisher = self.create_publisher(String, 'capture_status', 10)
-        self.get_logger().info("Image capture Node started")
+        self.status_final_callback = self.create_publisher(String, 'vision_capture_status', 10)
+        
+        self.get_logger().info("Image capture Node has  started")
+        self.stages=0
 
         self.bridge = CvBridge()  # Initialize CvBridge once
         
@@ -31,13 +34,8 @@ class ImageCaptureNode(Node):
         os.makedirs(path, exist_ok=True)
         
         for i in range(3):  # Capture 3 images for each message revieve from person_name
-            #turn left up
-            #turn left down
-            #turn right up
-            #turn right down
-            #straight to camera
-            #straight to camera up
-            #straight to camera down
+            #turn left up, turn left down, turn right up, turn right down, straight to camera
+            #straight to camera up, straight to camera down
             
             ret, frame = self.camera.read()
             if not ret:
@@ -48,11 +46,17 @@ class ImageCaptureNode(Node):
             cv2.imwrite(f'{path}/{picnumber}.png', frame)
             self.get_logger().info(f"Image saved as {path}/{picnumber}.png")
             
-            self.get_logger().info("sleep mode for 2 seconds...")
-            time.sleep(2)  # Pause between captures
-                        
+            self.get_logger().info("sleep mode for 4 seconds...")
+            time.sleep(4)  # Pause between captures
+            
         self.ok_publisher.publish(String(data="OK"))  # Publish OK message
-        self.get_logger().info("Info", "Images Captured Successfully!")
+        self.get_logger().info("Images Captured Successfully!")
+        self.stages+=1      
+    
+    def status_final_callback(self):
+        if self.stages==7: #depois que as 7 etapas sao percorridas manda o ok final
+            self.status_final_callback.publish(String(data="OK!"))  # Publish OK message
+            self.get_logger().info("The train has finished!")
         
     def destroy_node(self):
         self.camera.release()

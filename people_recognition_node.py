@@ -11,23 +11,32 @@ from scipy.spatial import distance
 from tkinter import *
 
 class PeopleRecognition(Node):
+    
     def __init__(self):
+        
         super().__init__("people_recognition_node")
+        
         self.detector = dlib.get_frontal_face_detector()
         self.sp = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
         self.facerec = dlib.face_recognition_model_v1('dlib_face_recognition_resnet_model_v1.dat')
         
         self.create_subscription(String, 'turned_around', self.turned_callback, 10)
+        #   FAZER ELE COMEÇAR DEPOIS DE RECEBER TURNED_AROUND
+        
         self.labels, self._descriptors = self.prepare_training_data("images")
+        
         self.name_publisher = self.create_publisher(String, 'recognized_person', 10)
         self.count_publisher = self.create_publisher(String, 'count_people', 10)
 
         self.get_logger().info("Face Recognition Node has Started")
+        
         os.makedirs('predict', exist_ok=True)
+        
         self.started = False
         self.total_faces_detected = 0  
 
     def turned_callback(self, msg):
+        # turned=msg.data
         if not self.started:
             self.get_logger().info("Preparing training data...")
             self.labels, self._descriptors = self.prepare_training_data("images")
@@ -138,7 +147,7 @@ class App:
         self.camera_label = Label(self.master)
         self.camera_label.pack()
 
-        self.cap = cv2.VideoCapture(0)  # Use the correct camera index
+        self.cap = cv2.VideoCapture(0)  # Use the correct camera index  ls /dev/video*
         self.update_frame()
 
     def update_frame(self):
