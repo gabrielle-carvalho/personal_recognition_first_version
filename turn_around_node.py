@@ -11,8 +11,6 @@ class TurnAround(Node):
         self.turned_publisher = self.create_publisher(String, 'turned_around', 10)
         self.get_logger().info("Node has started")
         
-        self.create_timer(1.0, self.publish_message)
-
     def publish_message(self):
         msg = String()
         msg.data = "Turned around"
