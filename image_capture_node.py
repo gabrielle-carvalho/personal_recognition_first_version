@@ -51,7 +51,7 @@ class ImageCaptureNode(Node): # node that capture images
             
         self.ok_publisher.publish(String(data="OK"))  # Publish OK message
         self.get_logger().info("Images Captured Successfully!")
-        self.stages+=1      
+        self.stages+=1     
     
     def status_final_callback(self):
         if self.stages==7: #depois que as 7 etapas sao percorridas manda o ok final

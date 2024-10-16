@@ -10,6 +10,7 @@ import numpy as np
 from scipy.spatial import distance
 from tkinter import *
 
+#recognition_callback pra rodar sem o turned
 class PeopleRecognition(Node):
     
     def __init__(self):
@@ -33,14 +34,15 @@ class PeopleRecognition(Node):
         os.makedirs('predict', exist_ok=True)
         
         self.started = False
+        self.recognition_enabled = False #active recognition
         self.total_faces_detected = 0  
 
     def turned_callback(self, msg):
-        # turned=msg.data
         if not self.started:
             self.get_logger().info("Preparing training data...")
             self.labels, self._descriptors = self.prepare_training_data("images")
             self.started = True
+        self.recognition_enabled = True
         self.get_logger().info(f'Received: "{msg.data}"')
 
     def prepare_training_data(self, data_folder_path):
@@ -75,8 +77,12 @@ class PeopleRecognition(Node):
         return labels, descriptors
 
     def recognition_callback(self, msg):
+        if not self.recognition_enabled:
+            return #se quiser rodar sem as palavras comenta
+        
         self.get_logger().info("Recognition callback called.")
         bridge = CvBridge()
+        
         try:
             frame = bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         except Exception as e:
