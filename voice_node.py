@@ -13,23 +13,21 @@ class VoiceNode(Node):
     def __init__(self):
         super().__init__('voice_node')
 
-        # Inicialização de publishers e subscribers
+        # Publishers
         self.publisher_name = self.create_publisher(String, 'person_name', 10)
-        
         self.publisher_training_status = self.create_publisher(String, 'training_finished', 10)
-        
-        # self.publisher_capture_status = self.create_publisher(String, 'capture_status', 10)
-        
         self.publisher_next_step = self.create_publisher(String, 'next_capture_step', 10)
         
+        # Subscribers
         self.subscription_capture = self.create_subscription(String, '/capture_status', self.capture_status_callback, 10)
-        # self.subscription = self.create_subscription(String,'/capture_status', self.capture_status_callback, 10)
 
         self.recognizer = sr.Recognizer()
         self.microphone = sr.Microphone()
         self.get_logger().info("Voice Node has started")
 
+        self.keyword_detected = False  # Flag para garantir que a palavra-chave só seja detectada uma vez
         self.current_step_index = 0
+        self.capture_status_ok = False  # Flag para aguardar o "OK"
         
         # Define capture steps
         self.capture_steps = [
@@ -72,87 +70,7 @@ class VoiceNode(Node):
         self.get_logger().info("Voice node started. Waiting for keyword...")
         self.timer = self.create_timer(2.0, self.listen_for_keyword)  # Timer para repetição do processo
 
-    def capture_status_callback(self, msg):
-        if msg.data == "OK":
-            self.capture_status_ok = True
-            # Verifica se ainda há passos restantes e reproduz o áudio do próximo passo
-            if self.current_step_index < len(self.capture_steps):
-                current_step = self.capture_steps[self.current_step_index]
-                self.play_audio(self.audio_files[current_step])
-                self.get_logger().info(f"Playing audio for: {current_step}")
-
-                # Avança para o próximo passo
-                self.current_step_index += 1
-                
-                # Quando todos os passos forem concluídos
-                if self.current_step_index >= len(self.capture_steps):
-                    self.get_logger().info("All capture steps completed.")
-                    self.play_audio(self.audio_file_path_training_finished)  # Reproduz o áudio de treinamento finalizado
-                    self.publish_training_finished()  # Publica que o treinamento foi finalizado
-
-
-    def play_audio(self, audio_file_path):
-        if os.path.exists(audio_file_path):
-            playsound(audio_file_path)
-        else:
-            self.get_logger().warning(f"Audio file not found: {audio_file_path}")
     
-    def play_audio_sequence(self):
-        steps = [
-            "straight_to_camera", "straight_to_camera_down", "straight_to_camera_up",
-            "turn_left_up", "turn_left_down", "turn_right_up", "turn_right_down"
-        ]
-
-        for step in steps:
-            # Espera pelo 'OK' do tópico /capture_status
-            while not self.capture_status_ok:
-                rclpy.spin_once(self, timeout_sec=0.1)
-            
-            # Reseta o status para a próxima etapa
-            self.capture_status_ok = False
-            
-            self.get_logger().info(f"Playing audio for: {step}")
-            self.play_audio(step)
-            self.get_logger().info("Proceeding to the next steps.")
-        
-        self.get_logger().info("All capture steps completed.")
-        self.publish_training_finished_status()
-
-
-    def listen_for_keyword(self):
-        with sr.Microphone() as source:
-            self.get_logger().info("Say the keyword...")
-            self.play_audio(self.audio_file_path_waiting)  # Reproduz o áudio de espera
-            audio = self.recognizer.listen(source)
-
-        # Convertendo o áudio capturado em um formato que podemos manipular com NumPy
-        audio_data = np.frombuffer(audio.get_raw_data(), np.int16)
-
-        # Aplicando a redução de ruído
-        reduced_noise = nr.reduce_noise(y=audio_data, sr=source.SAMPLE_RATE)
-
-        # Reconstruindo o áudio com o ruído reduzido
-        audio_reduced = sr.AudioData(reduced_noise.tobytes(), source.SAMPLE_RATE, 2)
-
-        try:
-            keyword = self.recognizer.recognize_google(audio_reduced)
-            self.get_logger().info(f"Captured keyword: {keyword}")
-
-            if "ok google" in keyword.lower() or "okay view" in keyword.lower() or "ok view" in keyword.lower():
-                keyword = "ok bill"
-
-            if "ok bill" in keyword.lower():
-                self.play_audio(self.audio_file_path_detected)  # Reproduz o áudio da palavra-chave reconhecida
-                self.get_logger().info("Keyword recognized. Asking for the name...")
-                self.ask_for_name()
-            else:
-                self.get_logger().info("Keyword not recognized.")
-                self.play_audio(self.audio_file_path_error)
-
-        except sr.UnknownValueError:
-            self.get_logger().info("I don't understand you. Please, repeat.")
-            self.play_audio(self.audio_file_path_dont_understand)
-
     def ask_for_name(self):
         while True:
             self.play_audio(self.audio_file_path_whats_your_name)
@@ -186,7 +104,31 @@ class VoiceNode(Node):
             except sr.UnknownValueError:
                 self.get_logger().info("I didn't catch that. Please, repeat your name.")
                 self.play_audio(self.audio_file_path_dont_understand)
+    
+    
+    def capture_status_callback(self, msg):
+        if msg.data == "ok":
+            self.capture_status_ok = True  # Define a flag como True quando o OK for recebido
 
+            # Só avança quando recebe OK
+            if self.current_step_index < len(self.capture_steps):
+                current_step = self.capture_steps[self.current_step_index]
+                self.play_audio(self.audio_files[current_step])
+                self.get_logger().info(f"Playing audio for: {current_step}")
+
+                # Avança para o próximo passo
+                self.current_step_index += 1
+
+                # Se todos os passos foram concluídos
+                if self.current_step_index >= len(self.capture_steps):
+                    self.get_logger().info("All capture steps completed.")
+                    self.play_audio(self.audio_file_path_training_finished)  # Reproduz o áudio de finalização
+                    self.publish_training_finished()  # Publica que o treinamento foi finalizado
+            else:
+                self.get_logger().info("No more steps to perform.")
+                self.get_logger().info("Waiting for new instructions...")
+                
+                
     def confirm_name(self, name):
         self.speak(f"Did you say your name is {name}? Please, say yes or no")
     
@@ -222,7 +164,83 @@ class VoiceNode(Node):
             self.get_logger().info("I don't understand you. Please, repeat.")
             self.play_audio(self.audio_file_path_dont_understand)  # Reproduz o áudio de não entendimento
             return False
+        
+    def listen_for_keyword(self):
+        if not self.keyword_detected:
+            self.get_logger().info("Say the keyword...")
+            
+            with sr.Microphone() as source:
+                self.get_logger().info("Say the keyword...")
+                self.play_audio(self.audio_file_path_waiting)  # Reproduz o áudio de espera
+                audio = self.recognizer.listen(source)
 
+            # Convertendo o áudio capturado em um formato que podemos manipular com NumPy
+            audio_data = np.frombuffer(audio.get_raw_data(), np.int16)
+
+            # Aplicando a redução de ruído
+            reduced_noise = nr.reduce_noise(y=audio_data, sr=source.SAMPLE_RATE)
+
+            # Reconstruindo o áudio com o ruído reduzido
+            audio_reduced = sr.AudioData(reduced_noise.tobytes(), source.SAMPLE_RATE, 2)
+
+            try:
+                keyword = self.recognizer.recognize_google(audio_reduced)
+                self.get_logger().info(f"Captured keyword: {keyword}")
+
+                if "ok google" in keyword.lower() or "okay view" in keyword.lower() or "ok view" in keyword.lower():
+                    keyword = "ok bill"
+
+                if "ok bill" in keyword.lower():
+                    self.keyword_detected = True  # Marca a palavra-chave como detectada
+                    self.get_logger().info(f"Keyword '{keyword}' detected.")
+                    self.play_audio(self.audio_file_path_detected)
+                    self.ask_for_name()  # Continua para perguntar o nome
+                else:
+                    self.get_logger().info("Keyword not detected. Trying again.")
+                    self.play_audio(self.audio_file_path_dont_understand)  # Reproduz áudio de não entendimento
+
+            except sr.UnknownValueError:
+                self.get_logger().info("I did not understand the keyword.")
+                self.play_audio(self.audio_file_path_error)  # Reproduz áudio de erro
+    
+
+    def play_audio(self, audio_file_path):
+        if os.path.exists(audio_file_path):
+            playsound(audio_file_path)
+        else:
+            self.get_logger().warning(f"Audio file not found: {audio_file_path}")
+    
+    def play_audio_sequence(self):
+        for step in self.capture_steps:
+            # Espera receber "OK" do tópico /capture_status antes de prosseguir para o próximo passo
+            while not self.capture_status_ok:
+                rclpy.spin_once(self)  # Processa as mensagens recebidas para verificar o status de captura
+            self.capture_status_ok = False  # Reseta o status para aguardar o próximo "OK"
+
+            # Reproduz o áudio correspondente ao passo atual
+            self.play_audio(self.audio_files[step])
+            self.get_logger().info(f"Playing audio for: {step}")
+            
+    def proceed_to_next_step(self):
+        self.get_logger().info("Proceeding to the next steps.")
+        
+        if self.current_step_index == 0:
+            # No início, apenas loga que está aguardando a primeira mensagem OK
+            self.get_logger().info("Waiting for 'OK' to proceed with the first capture step.")
+        # O avanço agora será controlado pelo callback capture_status_callback
+
+    def publish_name(self, name):
+        msg = String()
+        msg.data = name
+        self.publisher_name.publish(msg)
+        self.get_logger().info(f"Published name: {name}")
+        
+    def publish_training_finished(self):
+        msg = String()
+        msg.data = "Training finished"
+        self.publisher_training_status.publish(msg)
+        self.get_logger().info("Published training finished status.")
+        
     def speak(self, text):
         # Certifique-se de que o diretório "audios" existe
         if not os.path.exists("audios"):
@@ -236,38 +254,6 @@ class VoiceNode(Node):
 
         os.remove(audio_file)
         
-    def publish_name(self, name):
-        msg = String()
-        msg.data = name
-        self.publisher_name.publish(msg)
-        self.get_logger().info(f"Published name: {name}")
-
-    def proceed_to_next_step(self):
-        self.get_logger().info("Proceeding to the next steps.")
-        
-        # Reproduz o áudio da etapa atual
-        if self.current_step_index < len(self.capture_steps):
-            current_step = self.capture_steps[self.current_step_index]
-            self.play_audio(self.audio_files[current_step])
-            self.get_logger().info(f"Playing audio for: {current_step}")
-            
-            # Avança para a próxima etapa
-            self.current_step_index += 1
-            
-            # Se ainda houver passos, chama novamente esta função para reproduzir o próximo passo
-            if self.current_step_index < len(self.capture_steps):
-                self.proceed_to_next_step()  # Chama a si mesma para o próximo passo
-            else:
-                self.get_logger().info("All capture steps completed.")
-                self.play_audio(self.audio_file_path_training_finished)  # Reproduz o áudio de treinamento finalizado
-                self.publish_training_finished()  # Publica que o treinamento foi finalizado
-
-
-    def publish_training_finished(self):
-        msg = String()
-        msg.data = "Training finished"
-        self.publisher_training_status.publish(msg)
-        self.get_logger().info("Published training finished status.")
 
 def main(args=None):
     rclpy.init(args=args)

@@ -16,6 +16,7 @@ class PeopleRecognition(Node):
     def __init__(self):
         
         super().__init__("people_recognition_node")
+
         
         self.detector = dlib.get_frontal_face_detector()
         self.sp = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
@@ -32,18 +33,24 @@ class PeopleRecognition(Node):
         self.get_logger().info("Face Recognition Node has Started")
         
         os.makedirs('predict', exist_ok=True)
-        
+
         self.started = False
         self.recognition_enabled = False #active recognition
         self.total_faces_detected = 0  
+    
 
     def turned_callback(self, msg):
+        self.get_logger().info("turned_callback called.")
+        self.get_logger().info("tmessage recieved: " + msg.data)
+
+        
         if not self.started:
-            self.get_logger().info("Preparing training data...")
+            self.get_logger().info("Preparing training data")
             self.labels, self._descriptors = self.prepare_training_data("images")
-            self.started = True
+            self.started = True #active detection after
+            
         self.recognition_enabled = True
-        self.get_logger().info(f'Received: "{msg.data}"')
+        self.get_logger().info(f'Received: "{msg.data}", Ecognition enable: {self.recognition_enabled}')
 
     def prepare_training_data(self, data_folder_path):
         labels = []
@@ -68,16 +75,23 @@ class PeopleRecognition(Node):
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                 faces = self.detector(gray)
 
+                if len(faces) == 0:
+                    self.get_logger().warning(f"No faces detected in image {image_path}.")
+                    continue
+
                 for face in faces:
                     shape = self.sp(gray, face)
                     face_descriptor = self.facerec.compute_face_descriptor(img, shape)
                     descriptors.append(np.array(face_descriptor))
                     labels.append(label)
 
+        self.get_logger().info(f"Total labels: {len(labels)}, Total descriptors: {len(descriptors)}")
         return labels, descriptors
 
     def recognition_callback(self, msg):
+        self.get_logger().info("Recognition callback triggered.")
         if not self.recognition_enabled:
+            self.get_logger().info("Recognition is not enabled.") 
             return #se quiser rodar sem as palavras comenta
         
         self.get_logger().info("Recognition callback called.")
@@ -167,10 +181,16 @@ class App:
         faces = self.people_recognition_node.detector(gray)
 
         self.frame_counter += 1
-        if self.frame_counter % 15 == 0:  # Capture every 15 frames
-            bridge = CvBridge()
-            msg = bridge.cv2_to_imgmsg(frame, encoding="bgr8")
-            self.people_recognition_node.recognition_callback(msg) 
+        
+        if self.frame_counter % 15==0:  # Capture every 15 frames
+            self.people_recognition_node.get_logger().info(f"Frame {self.frame_counter}: Capturing frame for recognition.")
+           
+            if self.people_recognition_node.recognition_enabled:
+                bridge=CvBridge()
+                msg = bridge.cv2_to_imgmsg(frame, encoding="bgr8")
+                self.people_recognition_node.recognition_callback(msg) 
+            else:
+                self.people_recognition_node.get_logger().info("Recognition is not enabled.")
 
         for face in faces:
             x, y, w, h = face.left(), face.top(), face.width(), face.height()
@@ -188,8 +208,17 @@ def main(args=None):
     
     people_recognition_node = PeopleRecognition()
     
+    # people_recognition_node.turned_callback(String(data="Turned around"))
+    
     root = Tk()
     app_instance = App(root, people_recognition_node)
+    people_recognition_node.get_logger().info("PeopleRecognition Node is up and running.")
+    
+     # Spin the node in a separate thread
+    import threading
+    threading.Thread(target=rclpy.spin, args=(people_recognition_node,), daemon=True).start()
+    
+    
     root.mainloop()
 
     app_instance.cap.release()
